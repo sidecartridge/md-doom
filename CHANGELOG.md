@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.0.3 (2025-07-01) - release
+## v0.0.31 (2025-12-26) - release
 - First version
 
 ---

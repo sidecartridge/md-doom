@@ -16,20 +16,14 @@
 #include "aconfig.h"
 #include "constants.h"
 #include "debug.h"
-#include "download.h"
 #include "ff.h"
-#include "httpc/httpc.h"
 #include "memfunc.h"
-#include "network.h"
 #include "pico/stdlib.h"
 #include "romemul.h"
 #include "sdcard.h"
 #include "select.h"
 #include "term.h"
 
-#define WIFI_SCAN_TIME_MS (5 * 1000)
-#define DOWNLOAD_START_MS (3 * 1000)
-#define DOWNLOAD_DAY_MS (86400 * 1000)
 #define SLEEP_LOOP_MS 100
 
 enum {
@@ -43,8 +37,8 @@ enum {
  * @brief
  *
  * Launches the ROM emulator application. Initializes terminal interfaces,
- * configures network and storage systems, and loads the ROM data from SD or
- * network sources. Manages the main loop which includes firmware bypass,
+ * configures storage systems, and loads the ROM data from SD or other sources.
+ * Manages the main loop which includes firmware bypass,
  * user interaction and potential system resets.
  */
 void emul_start();

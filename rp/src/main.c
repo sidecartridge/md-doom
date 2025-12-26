@@ -12,6 +12,8 @@
 #include "emul.h"
 #include "gconfig.h"
 #include "reset.h"
+#include "hardware/clocks.h"
+#include "hardware/vreg.h"
 
 // This is the main.c file for the app or microfirmware. It is the entry point
 // for the application. It is the first file that is executed when the

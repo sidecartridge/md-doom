@@ -13,7 +13,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../../build/romemul.pio.h"
 #include "constants.h"
 #include "debug.h"
 #include "hardware/dma.h"
@@ -23,7 +22,9 @@
 #include "memfunc.h"
 #include "pico/stdlib.h"
 
-#define ROMEMUL_BUS_BITS 17
+#define ROMEMUL_BUS_BITS (15 + ROM_BANKS)
+
+#include "../../build/romemul.pio.h"
 
 typedef void (*IRQInterceptionCallback)();
 

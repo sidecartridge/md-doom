@@ -10,12 +10,12 @@ git submodule update --init --recursive
 # Pin the building versions
 echo "Pinning the SDK versions..."
 cd pico-sdk
-git checkout tags/2.1.1
+git checkout tags/2.2.0
 cd ..
 
 echo "Pinning the Extras SDK versions..."
 cd pico-extras
-git checkout tags/sdk-2.1.1
+git checkout tags/sdk-2.2.0
 cd ..
 
 echo "Pinning the FatFs SDK versions..."
@@ -24,10 +24,6 @@ cd fatfs-sdk
 #git checkout 6bdb39f96fe8b897aff12bf3416e32515792e318
 git checkout tags/v3.6.2
 cd ..
-
-# This is a dirty hack to guarantee that I can use the fatfs-sdk submodule
-echo "Patching the fatfs-sdk... to use chmod"
-sed -i.bak 's/#define FF_USE_CHMOD[[:space:]]*0/#define FF_USE_CHMOD 1/' fatfs-sdk/src/include/ffconf.h && mv fatfs-sdk/src/include/ffconf.h.bak .
 
 # Set the environment variables of the SDKs
 export PICO_SDK_PATH=$PWD/pico-sdk

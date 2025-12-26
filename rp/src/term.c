@@ -8,13 +8,6 @@
 
 #include "term.h"
 
-static TransmissionProtocol lastProtocol;
-static bool lastProtocolValid = false;
-
-static uint32_t memorySharedAddress = 0;
-static uint32_t memoryRandomTokenAddress = 0;
-static uint32_t memoryRandomTokenSeedAddress = 0;
-
 // Command handlers
 static void cmdClear(const char *arg);
 static void cmdExit(const char *arg);
@@ -33,62 +26,10 @@ void term_setCommands(const Command *cmds, size_t count) {
   numCommands = count;
 }
 
-/**
- * @brief Callback that handles the protocol command received.
- *
- * This callback copy the content of the protocol to the last_protocol
- * structure. The last_protocol_valid flag is set to true to indicate that the
- * last_protocol structure contains a valid protocol. We return to the
- * dma_irq_handler_lookup function to continue asap with the next
- *
- * @param protocol The TransmissionProtocol structure containing the protocol
- * information.
- */
-static inline void __not_in_flash_func(handle_protocol_command)(
-    const TransmissionProtocol *protocol) {
-  // Copy the content of protocol to last_protocol
-  // Copy the 8-byte header directly
-  lastProtocol.command_id = protocol->command_id;
-  lastProtocol.payload_size = protocol->payload_size;
-  lastProtocol.bytes_read = protocol->bytes_read;
-  lastProtocol.final_checksum = protocol->final_checksum;
-
-  // Sanity check: clamp payload_size to avoid overflow
-  uint16_t size = protocol->payload_size;
-  if (size > MAX_PROTOCOL_PAYLOAD_SIZE) {
-    size = MAX_PROTOCOL_PAYLOAD_SIZE;
-  }
-
-  // Copy only used payload bytes
-  memcpy(lastProtocol.payload, protocol->payload, size);
-
-  lastProtocolValid = true;
-};
-
-static inline void __not_in_flash_func(handle_protocol_checksum_error)(
-    const TransmissionProtocol *protocol) {
-  DPRINTF("Checksum error detected (ID=%u, Size=%u)\n", protocol->command_id,
-          protocol->payload_size);
-}
-
 // Interrupt handler for DMA completion
 void __not_in_flash_func(term_dma_irq_handler_lookup)(void) {
   // Read the rom3 signal and if so then process the command
   dma_hw->ints1 = 1U << 2;
-
-  // Read once to avoid redundant hardware access
-  uint32_t addr = dma_hw->ch[2].al3_read_addr_trig;
-
-  // Check ROM3 signal (bit 16)
-  // We expect that the ROM3 signal is not set very often, so this should help
-  // the compilar to run faster
-  if (__builtin_expect(addr & 0x00010000, 0)) {
-    // Invert highest bit of low word to get 16-bit address
-    uint16_t addr_lsb = (uint16_t)(addr ^ ADDRESS_HIGH_BIT);
-
-    tprotocol_parse(addr_lsb, handle_protocol_command,
-                    handle_protocol_checksum_error);
-  }
 }
 
 static char screen[TERM_SCREEN_SIZE];
@@ -434,153 +375,18 @@ static void termTypeString(const char *str) {
 }
 
 void term_init(void) {
-  // Memory shared address
-  memorySharedAddress = (unsigned int)&__rom_in_ram_start__;
-  memoryRandomTokenAddress = memorySharedAddress + TERM_RANDOM_TOKEN_OFFSET;
-  memoryRandomTokenSeedAddress =
-      memorySharedAddress + TERM_RANDON_TOKEN_SEED_OFFSET;
-  SET_SHARED_VAR(TERM_HARDWARE_TYPE, 0, memorySharedAddress,
-                 TERM_SHARED_VARIABLES_OFFSET);  // Clean the hardware type
-  SET_SHARED_VAR(TERM_HARDWARE_VERSION, 0, memorySharedAddress,
-                 TERM_SHARED_VARIABLES_OFFSET);  // Clean the hardware version
-
-  // Initialize the random seed (add this line)
+  // Initialize the random seed
   srand(time(NULL));
-  // Init the random token seed in the shared memory for the next command
-  uint32_t newRandomSeedToken = rand();  // Generate a new random 32-bit value
-  TPROTO_SET_RANDOM_TOKEN(memoryRandomTokenSeedAddress, newRandomSeedToken);
 
   // Initialize the welcome messages
   term_clearScreen();
-  term_printString("Welcome to the terminal!\n");
-  term_printString("Press ESC to enter the terminal.\n");
-  term_printString("or any SHIFT key to boot the desktop.\n");
-
-  // Example 1: Move the cursor up one line.
-  // VT52 sequence: ESC A (moves cursor up)
-  // The escape sequence "\x1BA" will move the cursor up one line.
-  // term_printString("\x1B" "A");
-  // After moving up, print text that overwrites part of the previous line.
-  // term_printString("Line 2 (modified by ESC A)\n");
-
-  // Example 2: Move the cursor right one character.
-  // VT52 sequence: ESC C (moves cursor right)
-  // term_printString("\x1B" "C");
-  // term_printString(" <-- Moved right with ESC C\n");
-
-  // Example 3: Direct cursor addressing.
-  // VT52 direct addressing uses ESC Y <row> <col>, where:
-  //   row_char = row + 0x20, col_char = col + 0x20.
-  // For instance, to move the cursor to row 0, column 10:
-  //   row: 0 -> 0x20 (' ')
-  //   col: 10 -> 0x20 + 10 = 0x2A ('*')
-  // term_printString("\x1B" "Y" "\x20" "\x2A");
-  // term_printString("Text at row 0, column 10 via ESC Y\n");
-
-  // term_printString("\x1B" "Y" "\x2A" "\x20");
-
   display_refresh();
 }
 
 // Invoke this function to process the commands from the active loop in the
 // main function
 void __not_in_flash_func(term_loop)() {
-  if (lastProtocolValid) {
-    // Shared by all commands
-    // Read the random token from the command and increment the payload
-    // pointer to the first parameter available in the payload
-    uint32_t randomToken = TPROTO_GET_RANDOM_TOKEN(lastProtocol.payload);
-    uint16_t *payloadPtr = ((uint16_t *)(lastProtocol).payload);
-    uint16_t commandId = lastProtocol.command_id;
-    DPRINTF(
-        "Command ID: %d. Size: %d. Random token: 0x%08X, Checksum: 0x%04X\n",
-        lastProtocol.command_id, lastProtocol.payload_size, randomToken,
-        lastProtocol.final_checksum);
-
-#if defined(_DEBUG) && (_DEBUG != 0)
-    // Jump the random token
-    TPROTO_NEXT32_PAYLOAD_PTR(payloadPtr);
-
-    // Read the payload parameters
-    uint16_t payloadSizeTmp = 4;
-    if ((lastProtocol.payload_size > payloadSizeTmp) &&
-        (lastProtocol.payload_size <= TERM_PARAMETERS_MAX_SIZE)) {
-      DPRINTF("Payload D3: 0x%04X\n", TPROTO_GET_PAYLOAD_PARAM32(payloadPtr));
-      TPROTO_NEXT32_PAYLOAD_PTR(payloadPtr);
-    }
-    payloadSizeTmp += 4;
-    if ((lastProtocol.payload_size > payloadSizeTmp) &&
-        (lastProtocol.payload_size <= TERM_PARAMETERS_MAX_SIZE)) {
-      DPRINTF("Payload D4: 0x%04X\n", TPROTO_GET_PAYLOAD_PARAM32(payloadPtr));
-      TPROTO_NEXT32_PAYLOAD_PTR(payloadPtr);
-    }
-    payloadSizeTmp += 4;
-    if ((lastProtocol.payload_size > payloadSizeTmp) &&
-        (lastProtocol.payload_size <= TERM_PARAMETERS_MAX_SIZE)) {
-      DPRINTF("Payload D5: 0x%04X\n", TPROTO_GET_PAYLOAD_PARAM32(payloadPtr));
-      TPROTO_NEXT32_PAYLOAD_PTR(payloadPtr);
-    }
-    payloadSizeTmp += 4;
-    if ((lastProtocol.payload_size > payloadSizeTmp) &&
-        (lastProtocol.payload_size <= TERM_PARAMETERS_MAX_SIZE)) {
-      DPRINTF("Payload D6: 0x%04X\n", TPROTO_GET_PAYLOAD_PARAM32(payloadPtr));
-      TPROTO_NEXT32_PAYLOAD_PTR(payloadPtr);
-    }
-#endif
-
-    // Handle the command
-    switch (lastProtocol.command_id) {
-      case APP_TERMINAL_START: {
-        display_termStart(DISPLAY_TILES_WIDTH, DISPLAY_TILES_HEIGHT);
-        term_clearScreen();
-        term_printString("Type 'help' for available commands.\n");
-        termInputChar('\n');
-        SEND_COMMAND_TO_DISPLAY(DISPLAY_COMMAND_TERM);
-        DPRINTF("Send command to display: DISPLAY_COMMAND_TERM\n");
-      } break;
-      case APP_TERMINAL_KEYSTROKE: {
-        uint16_t *payload = ((uint16_t *)(lastProtocol).payload);
-        // Jump the random token
-        TPROTO_NEXT32_PAYLOAD_PTR(payload);
-        // Extract the 32 bit payload
-        uint32_t payload32 = TPROTO_GET_PAYLOAD_PARAM32(payload);
-        // Extract the ascii code from the payload lower 8 bits
-        char keystroke = (char)(payload32 & TERM_KEYBOARD_KEY_MASK);
-        // Get the shift key status from the higher byte of the payload
-        uint8_t shiftKey =
-            (payload32 & TERM_KEYBOARD_SHIFT_MASK) >> TERM_KEYBOARD_SHIFT_SHIFT;
-        // Get the keyboard scan code from the bits 16 to 23 of the payload
-        uint8_t scanCode =
-            (payload32 & TERM_KEYBOARD_SCAN_MASK) >> TERM_KEYBOARD_SCAN_SHIFT;
-        if (keystroke >= TERM_KEYBOARD_KEY_START &&
-            keystroke <= TERM_KEYBOARD_KEY_END) {
-          // Print the keystroke and the shift key status
-          DPRINTF("Keystroke: %c. Shift key: %d, Scan code: %d\n", keystroke,
-                  shiftKey, scanCode);
-        } else {
-          // Print the keystroke and the shift key status
-          DPRINTF("Keystroke: %d. Shift key: %d, Scan code: %d\n", keystroke,
-                  shiftKey, scanCode);
-        }
-        termInputChar(keystroke);
-        break;
-      }
-      default:
-        // Unknown command
-        DPRINTF("Unknown command\n");
-        break;
-    }
-    if (memoryRandomTokenAddress != 0) {
-      // Set the random token in the shared memory
-      TPROTO_SET_RANDOM_TOKEN(memoryRandomTokenAddress, randomToken);
-
-      // Init the random token seed in the shared memory for the next command
-      uint32_t newRandomSeedToken =
-          rand();  // Generate a new random 32-bit value
-      TPROTO_SET_RANDOM_TOKEN(memoryRandomTokenSeedAddress, newRandomSeedToken);
-    }
-  }
-  lastProtocolValid = false;
+  return;
 }
 
 // Command handlers

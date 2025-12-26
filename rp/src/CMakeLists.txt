@@ -76,9 +76,6 @@ add_subdirectory(settings)
 # Add u8g2 library
 add_subdirectory(u8g2)
 
-# Add HTTP client library
-add_subdirectory(httpc)
-
 # Tell CMake where to find other source code
 add_subdirectory($ENV{FATFS_SDK_PATH}/src build)
   
@@ -91,14 +88,11 @@ pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/romemul.pio)
 
 target_sources(${PROJECT_NAME} PRIVATE
         aconfig.c
-        blink.c
         display.c
         display_term.c
-        download.c
         emul.c
         gconfig.c
         hw_config.c
-        network.c
         reset.c
         romemul.c
         sdcard.c
@@ -116,27 +110,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     no-OS-FatFS-SD-SDIO-SPI-RPi-Pico                # FATFS library   
     pico_stdlib              # Core functionality
     pico_multicore          # Multicore support
-    httpc                    # HTTP client
     settings                 # Custom settings library
     u8g2                     # for display
 )
-
-# Conditionally link the CYW43 architecture library if supported
-if (PICO_CYW43_SUPPORTED)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        pico_cyw43_arch_lwip_poll
-#        pico_cyw43_arch_lwip_threadsafe_background
-        )
-else()
-    message(WARNING "CYW43 architecture not supported")
-endif()
 
 # Link custom memmap with reserved memory for ROMs
 set_target_properties(${PROJECT_NAME} PROPERTIES
         PICO_TARGET_LINKER_SCRIPT ${CMAKE_CURRENT_LIST_DIR}/memmap_rp.ld
 )
 
-# Needed to include lwipopts.h properly
 target_include_directories(${PROJECT_NAME} PRIVATE 
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/include
@@ -225,8 +207,6 @@ add_definitions(-DDISPLAY_ATARIST)
 # We don't modify the flash in Core 1
 add_definitions(-DPICO_FLASH_ASSUME_CORE0_SAFE=1)
 
-# Select HTTPS or HTTP downloads of the firmware
-add_definitions(-DAPP_DOWNLOAD_HTTPS=0)
 
 # Remove unused data
 target_link_options(${PROJECT_NAME} PRIVATE
